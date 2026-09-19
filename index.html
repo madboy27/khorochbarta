@@ -34,6 +34,10 @@ h2{font-size:15px;margin:22px 0 4px;color:var(--mute);font-weight:600}
 .it div{flex:1;min-width:0}
 .it small{color:var(--mute);display:block;overflow-wrap:anywhere}
 .a{font-weight:700;white-space:nowrap}
+.pp{width:100%;background:none;border:0;border-bottom:1px solid var(--line);font:inherit;color:inherit;text-align:left}
+.s3{grid-template-columns:repeat(3,1fr)}.s4{grid-template-columns:1fr 1fr;margin-top:8px}
+#who{margin-top:12px}
+.mo{flex-wrap:wrap;gap:4px 24px}
 .inc{color:var(--inc)}.exp{color:var(--exp)}
 .x{border:0;background:none;color:var(--mute);font-size:22px;padding:2px 8px}
 .ghost{border:1.5px solid var(--ink);background:none;color:var(--ink);border-radius:10px;font:inherit;padding:8px 14px}
@@ -47,7 +51,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--mark);outline-o
 <body>
 <main>
 <header class="top"><small>হাতে আছে</small><div id="bal">৳ ০</div>
-<div class="mo"><span><small>এই মাসে আয়</small><b id="mi"></b></span><span><small>এই মাসে খরচ</small><b id="me"></b></span></div></header>
+<div class="mo"><span><small>এই মাসে আয়</small><b id="mi"></b></span><span><small>এই মাসে খরচ</small><b id="me"></b></span></div>
+<div class="mo"><span><small>পাওনা</small><b id="pw"></b></span><span><small>দেনা</small><b id="dn"></b></span><span><small>আসল অবস্থা</small><b id="real"></b></span></div></header>
 
 <section id="setup" class="card" hidden>
 <label for="s0"><b>এখন তোমার হাতে কত টাকা আছে?</b></label>
@@ -58,12 +63,16 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--mark);outline-o
 <div id="app" hidden>
 <div id="bk" class="warn" hidden>৭ দিনের বেশি ব্যাকআপ নেওয়া হয়নি।<br><button class="ghost" id="bk2" type="button">এখনই ব্যাকআপ নাও</button></div>
 <form class="card" id="f">
-<div class="seg"><button type="button" data-t="exp" aria-pressed="true">খরচ</button><button type="button" data-t="inc" aria-pressed="false">আয়</button></div>
+<div class="seg s3" id="tp"><button type="button" data-t="exp" aria-pressed="true">খরচ</button><button type="button" data-t="inc" aria-pressed="false">আয়</button><button type="button" data-t="lend" aria-pressed="false">পাওনা-দেনা</button></div>
+<div class="seg s4" id="ls" hidden><button type="button" data-t="lend">ধার দিলাম</button><button type="button" data-t="recv">ফেরত পেলাম</button><button type="button" data-t="borrow">ধার নিলাম</button><button type="button" data-t="pay">শোধ করলাম</button></div>
 <input id="amt" type="number" inputmode="decimal" min="0.01" step="any" placeholder="কত টাকা?" required aria-label="টাকার পরিমাণ">
+<input id="who" list="ppl" placeholder="কার সাথে? (নাম)" aria-label="নাম" hidden><datalist id="ppl"></datalist>
 <div class="chips" id="chips"></div>
 <div class="row2"><input id="note" placeholder="নোট (ঐচ্ছিক)" aria-label="নোট"><input id="date" type="date" aria-label="তারিখ"></div>
 <button class="go" type="submit">যোগ করো</button>
 </form>
+<h2>পাওনা-দেনা</h2>
+<div id="plist"></div>
 <h2>লেনদেন</h2>
 <div id="list"></div>
 <h2>ব্যাকআপ</h2>
@@ -75,43 +84,62 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--mark);outline-o
 <script>
 const K='hisab-v1',$=s=>document.querySelector(s),bn=n=>n.toLocaleString('bn-BD',{maximumFractionDigits:2}),
 esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),
-SG={inc:1,exp:-1},START='শুরুর টাকা',r2=n=>Math.round(n*100)/100,
+SG={inc:1,exp:-1,lend:-1,recv:1,borrow:1,pay:-1},START='শুরুর টাকা',r2=n=>Math.round(n*100)/100,
 today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)},
 fresh=()=>({tx:[],init:false,bk:Date.now(),cats:{exp:['খাবার','যাতায়াত','পড়াশোনা','বই-খাতা','মোবাইল/নেট','অন্যান্য'],inc:['বিক্রি','উপহার','অন্যান্য']}});
 let S=(()=>{try{const d=JSON.parse(localStorage.getItem(K));if(d&&Array.isArray(d.tx))return d}catch(e){}return fresh()})(),type='exp',cat='';
 const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){alert('সেভ করা যায়নি। ফোনের জায়গা বা ব্রাউজারের সেটিং দেখো।')}};
 const balance=()=>r2(S.tx.reduce((s,t)=>s+SG[t.t]*t.a,0));
 
-function chips(){const L=S.cats[type];if(!L.includes(cat))cat=L[0];
+const LN=['lend','recv','borrow','pay'],isL=()=>LN.includes(type),
+LB={lend:'ধার দিলাম',recv:'ফেরত পেলাম',borrow:'ধার নিলাম',pay:'শোধ করলাম'},
+nets=()=>{const m={};S.tx.forEach(t=>{if(t.p)m[t.p]=r2((m[t.p]||0)+({lend:1,recv:-1,borrow:-1,pay:1}[t.t]||0)*t.a)});return m};
+function ui(){document.querySelectorAll('#tp button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===type||(b.dataset.t==='lend'&&isL())));
+ document.querySelectorAll('#ls button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===type));
+ $('#ls').hidden=$('#who').hidden=!isL();$('#chips').hidden=isL();chips()}
+function chips(){if(isL())return;const L=S.cats[type];if(!L.includes(cat))cat=L[0];
  $('#chips').innerHTML=L.map(c=>`<button type="button" aria-pressed="${c===cat}" data-c="${esc(c)}">${esc(c)}</button>`).join('')+'<button type="button" data-new="1">+ নতুন</button>'}
 
 function render(){
  $('#setup').hidden=S.init;$('#app').hidden=!S.init;
  const m=today().slice(0,7);let i=0,e=0;
- S.tx.forEach(t=>{if(t.d.slice(0,7)===m&&t.c!==START){t.t==='inc'?i+=t.a:e+=t.a}});
+ S.tx.forEach(t=>{if(t.d.slice(0,7)===m&&t.c!==START&&(t.t==='inc'||t.t==='exp')){t.t==='inc'?i+=t.a:e+=t.a}});
  $('#bal').textContent='৳ '+bn(balance());$('#mi').textContent='৳ '+bn(r2(i));$('#me').textContent='৳ '+bn(r2(e));
+ const N=nets();let pw=0,dn=0,ph='';
+ Object.entries(N).filter(([,v])=>v).sort((x,y)=>Math.abs(y[1])-Math.abs(x[1])).forEach(([k,v])=>{v>0?pw+=v:dn-=v;
+  ph+=`<button type="button" class="it pp" data-p="${esc(k)}"><div>${esc(k)}<small>${v>0?'পাবো':'দেবো'}</small></div><span class="a ${v>0?'inc':'exp'}">${bn(Math.abs(v))}</span></button>`});
+ $('#pw').textContent='৳ '+bn(r2(pw));$('#dn').textContent='৳ '+bn(r2(dn));$('#real').textContent='৳ '+bn(r2(balance()+pw-dn));
+ $('#ppl').innerHTML=Object.keys(N).map(k=>`<option value="${esc(k)}">`).join('');
+ $('#plist').innerHTML=ph?ph+'<p class="empty">নামে ট্যাপ করলে ফেরত বা শোধের এন্ট্রি খুলবে।</p>':'<p class="empty">কারও সাথে পাওনা-দেনা নেই।</p>';
  $('#bk').hidden=!(S.tx.length&&Date.now()-S.bk>6048e5);
  const tx=[...S.tx].sort((a,b)=>b.d.localeCompare(a.d)||b.ts-a.ts);let h='',last='';
  tx.forEach(t=>{
   if(t.d!==last){last=t.d;h+=`<h2>${t.d===today()?'আজ':new Date(t.d+'T00:00').toLocaleDateString('bn-BD',{day:'numeric',month:'long'})}</h2>`}
-  h+=`<div class="it"><div>${esc(t.c)}${t.n?`<small>${esc(t.n)}</small>`:''}</div><span class="a ${t.t}">${t.t==='inc'?'+':'−'}${bn(t.a)}</span><button class="x" data-del="${t.id}" aria-label="মুছো">×</button></div>`});
+  const sub=[t.p?t.c:'',t.n].filter(Boolean).join(', ');
+  h+=`<div class="it"><div>${esc(t.p||t.c)}${sub?`<small>${esc(sub)}</small>`:''}</div><span class="a ${SG[t.t]>0?'inc':'exp'}">${SG[t.t]>0?'+':'−'}${bn(t.a)}</span><button class="x" data-del="${t.id}" aria-label="মুছো">×</button></div>`});
  $('#list').innerHTML=h||'<p class="empty">এখনও কোনো এন্ট্রি নেই। উপরে টাকার পরিমাণ লিখে প্রথম এন্ট্রি দাও।</p>'}
 
 document.addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
- if(b.dataset.t){type=b.dataset.t;document.querySelectorAll('.seg button').forEach(x=>x.setAttribute('aria-pressed',x===b));chips()}
+ if(b.dataset.t){if(!(b.closest('#tp')&&b.dataset.t==='lend'&&isL()))type=b.dataset.t;ui()}
+ else if(b.dataset.p!==undefined){const v=nets()[b.dataset.p]||0;type=v>0?'recv':'pay';ui();$('#who').value=b.dataset.p;$('#amt').value=Math.abs(v);$('#f').scrollIntoView({behavior:'smooth'});$('#amt').focus()}
  else if(b.dataset.new){const n=(prompt('নতুন ক্যাটাগরির নাম')||'').trim();if(n&&!S.cats[type].includes(n)){S.cats[type].push(n);cat=n;save()}chips()}
  else if(b.dataset.c){cat=b.dataset.c;chips()}
  else if(b.dataset.del){if(confirm('এন্ট্রিটা মুছবে?')){S.tx=S.tx.filter(t=>t.id!==b.dataset.del);save();render()}}
 });
 
 $('#f').onsubmit=ev=>{ev.preventDefault();const a=r2(parseFloat($('#amt').value));if(!(a>0))return;
- if(type==='exp'&&a>balance()&&!confirm('হাতে আছে ৳ '+bn(balance())+', এর চেয়ে বেশি খরচ দিচ্ছ। তবুও যোগ করবে?'))return;
- S.tx.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),t:type,a,c:cat,n:$('#note').value.trim(),d:$('#date').value||today(),ts:Date.now()});
- save();$('#amt').value='';$('#note').value='';render();$('#amt').focus()};
+ const p=isL()?$('#who').value.trim():'';
+ if(isL()&&!p){alert('কার সাথে লেনদেন, নামটা লেখো।');$('#who').focus();return}
+ const n=nets()[p]||0;
+ if(SG[type]<0&&a>balance()&&!confirm('হাতে আছে ৳ '+bn(balance())+', এর চেয়ে বেশি দিচ্ছ। তবুও যোগ করবে?'))return;
+ if(type==='recv'&&a>Math.max(n,0)&&!confirm('তোমার পাওনা ৳ '+bn(Math.max(n,0))+', এর চেয়ে বেশি ফেরত লিখছ। তবুও যোগ করবে?'))return;
+ if(type==='pay'&&a>Math.max(-n,0)&&!confirm('তোমার দেনা ৳ '+bn(Math.max(-n,0))+', এর চেয়ে বেশি শোধ লিখছ। তবুও যোগ করবে?'))return;
+ S.tx.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),t:type,a,c:isL()?LB[type]:cat,p,n:$('#note').value.trim(),d:$('#date').value||today(),ts:Date.now()});
+ save();$('#amt').value='';$('#note').value='';$('#who').value='';render();$('#amt').focus()};
 
 $('#sgo').onclick=()=>{const a=r2(parseFloat($('#s0').value)||0);
  if(a>0)S.tx.push({id:'start',t:'inc',a,c:START,n:'',d:today(),ts:Date.now()});
- S.init=true;S.bk=Date.now();save();render();chips()};
+ S.init=true;S.bk=Date.now();save();render();ui()};
 
 const dl=()=>{S.bk=Date.now();save();const u=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'})),a=document.createElement('a');
  a.href=u;a.download='hisab-backup-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1e3);render()};
@@ -120,10 +148,10 @@ $('#im').onclick=()=>$('#file').click();
 $('#file').onchange=async ev=>{const f=ev.target.files[0];ev.target.value='';if(!f)return;
  try{const d=JSON.parse(await f.text());if(!Array.isArray(d.tx))throw 0;
   if(!confirm('বর্তমান হিসাব মুছে এই ব্যাকআপের হিসাব বসবে। এগিয়ে যাবে?'))return;
-  S=Object.assign(fresh(),d,{init:true});save();render();chips()}
+  S=Object.assign(fresh(),d,{init:true});save();render();ui()}
  catch(e){alert('ফাইলটা ঠিক ব্যাকআপ ফাইল নয়।')}};
 
-$('#date').value=today();render();chips();
+$('#date').value=today();render();ui();
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
 </script>
